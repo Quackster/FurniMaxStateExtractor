@@ -41,18 +41,22 @@ namespace HabboFurniTools
                 {
                     // Compressed SWF: decompress it
                     byte[] compressedData = br.ReadBytes((int)(fileLength - 8));
-                    using var compressedStream = new MemoryStream(compressedData);
-                    using var decompressedStream = new MemoryStream();
+                    using (var compressedStream = new MemoryStream(compressedData))
+                    {
+                        using (var decompressedStream = new MemoryStream())
+                        {
 
-                    using (var inflater = new InflaterInputStream(compressedStream))
-                        inflater.CopyTo(decompressedStream);
+                            using (var inflater = new InflaterInputStream(compressedStream))
+                                inflater.CopyTo(decompressedStream);
 
-                    swfData = new byte[8 + decompressedStream.Length];
-                    Array.Copy(Encoding.ASCII.GetBytes("FWS"), 0, swfData, 0, 3);
-                    swfData[3] = version;
-                    BitConverter.GetBytes((uint)(8 + decompressedStream.Length)).CopyTo(swfData, 4);
-                    decompressedStream.Position = 0;
-                    decompressedStream.Read(swfData, 8, (int)decompressedStream.Length);
+                            swfData = new byte[8 + decompressedStream.Length];
+                            Array.Copy(Encoding.ASCII.GetBytes("FWS"), 0, swfData, 0, 3);
+                            swfData[3] = version;
+                            BitConverter.GetBytes((uint)(8 + decompressedStream.Length)).CopyTo(swfData, 4);
+                            decompressedStream.Position = 0;
+                            decompressedStream.Read(swfData, 8, (int)decompressedStream.Length);
+                        }
+                    }
                 }
                 else if (signature == "FWS")
                 {
@@ -66,38 +70,42 @@ namespace HabboFurniTools
                 }
             }
 
-            using var swfStream = new MemoryStream(swfData);
-            using var swfReader = new BinaryReader(swfStream);
-
-            swfStream.Position = 8; // Skip SWF header (8 bytes)
-
-            // Skip RECT header: compute RECT length to move past it
-            int nbits = swfReader.ReadByte() >> 3;
-            int rectBits = 5 + nbits * 4;
-            int rectBytes = (rectBits + 7) / 8;
-            swfStream.Position = 8 + rectBytes + 2 + 2; // RECT + FrameRate(2) + FrameCount(2)
-
-            while (swfStream.Position < swfStream.Length)
+            using (var swfStream = new MemoryStream(swfData))
             {
-                if (!TryReadTagHeader(swfReader, out ushort tagCode, out uint tagLength))
-                    break;
-
-                long tagEndPos = swfStream.Position + tagLength;
-
-                if (tagCode == 87) // DefineBinaryData
+                using (var swfReader = new BinaryReader(swfStream))
                 {
-                    ushort characterId = swfReader.ReadUInt16();
-                    swfReader.ReadUInt32(); // Reserved field
-                    long dataLength = tagLength - 6;
-                    byte[] binaryData = swfReader.ReadBytes((int)dataLength);
 
-                    if (IsVisualizationXml(binaryData))
+                    swfStream.Position = 8; // Skip SWF header (8 bytes)
+
+                    // Skip RECT header: compute RECT length to move past it
+                    int nbits = swfReader.ReadByte() >> 3;
+                    int rectBits = 5 + nbits * 4;
+                    int rectBytes = (rectBits + 7) / 8;
+                    swfStream.Position = 8 + rectBytes + 2 + 2; // RECT + FrameRate(2) + FrameCount(2)
+
+                    while (swfStream.Position < swfStream.Length)
                     {
-                        return ExtractMaxStates(binaryData);
+                        if (!TryReadTagHeader(swfReader, out ushort tagCode, out uint tagLength))
+                            break;
+
+                        long tagEndPos = swfStream.Position + tagLength;
+
+                        if (tagCode == 87) // DefineBinaryData
+                        {
+                            ushort characterId = swfReader.ReadUInt16();
+                            swfReader.ReadUInt32(); // Reserved field
+                            long dataLength = tagLength - 6;
+                            byte[] binaryData = swfReader.ReadBytes((int)dataLength);
+
+                            if (IsVisualizationXml(binaryData))
+                            {
+                                return ExtractMaxStates(binaryData);
+                            }
+                        }
+
+                        swfStream.Position = tagEndPos;
                     }
                 }
-
-                swfStream.Position = tagEndPos;
             }
 
             return -1;
